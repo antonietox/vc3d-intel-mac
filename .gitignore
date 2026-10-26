@@ -1,0 +1,4 @@
+*.AppImage
+*.AppImage.part
+old-appimages/
+.DS_Store
