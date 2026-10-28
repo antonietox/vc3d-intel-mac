@@ -37,7 +37,7 @@ Result: Open Data Catalog loads the live sample list from the public bucket, sam
 
 ```bash
 git clone https://github.com/antonietox/vc3d-intel-mac && cd vc3d-intel-mac
-./fetch-appimage.sh              # newest Linux x86_64 AppImage from villa releases (~125 MB)
+./fetch-appimage.sh              # newest Linux x86_64 AppImage (~125 MB), sha256 checked against GitHub
 docker build -t vc3d-intel-mac .
 ./run-vc3d.sh list               # should print ~50 vc_* tools
 ```
