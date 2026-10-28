@@ -95,6 +95,8 @@ Until October 2026 this repo ran the Linux AppImage in Docker + XQuartz. That ap
 
 ## License
 
-MIT for the scripts in this repo. VC3D itself is licensed by its authors; see [villa](https://github.com/ScrollPrize/villa).
+- **Scripts and docs in this repo:** MIT ([LICENSE](LICENSE)).
+- **VC3D (the app in the DMG):** GPL-3.0, © EduceLab and the Vesuvius Challenge contributors ([LICENSE-VC3D](LICENSE-VC3D), [NOTICE-VC3D](NOTICE-VC3D)). The corresponding source is [villa](https://github.com/ScrollPrize/villa) at the commit named in each release, plus [`patches/intel-mac-conda.patch`](patches/intel-mac-conda.patch). The DMG carries the same license, notice and source pointer.
+- **Bundled libraries** (Qt, OpenCV, Boost, Ceres, CGAL, …) come from [conda-forge](https://conda-forge.org) and keep their own licenses.
 
 Written and tested by Michele Brusemini, with help from an AI assistant.

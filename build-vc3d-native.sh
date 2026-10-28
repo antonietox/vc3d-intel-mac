@@ -49,6 +49,19 @@ package() {
   rm -rf "$BASE/dist/stage" && mkdir -p "$BASE/dist/stage"
   ditto "$staged/VC3D.app" "$BASE/dist/stage/VC3D.app"
   ln -s /Applications "$BASE/dist/stage/Applications"
+  # VC3D is GPL-3.0: ship its license, notice and where the source lives.
+  cp "$SRC/LICENSE" "$BASE/dist/stage/LICENSE (VC3D, GPL-3.0).txt"
+  cp "$SRC/NOTICE" "$BASE/dist/stage/NOTICE (VC3D).txt"
+  cat > "$BASE/dist/stage/Source code.txt" <<SRCEOF
+VC3D source: https://github.com/ScrollPrize/villa (volume-cartographer),
+commit $(git -C "$BASE/villa" rev-parse HEAD)
+
+Build recipe and the small patch applied for this Intel-mac build:
+https://github.com/antonietox/vc3d-intel-mac
+
+Bundled third-party libraries come from conda-forge (https://conda-forge.org)
+and keep their own licenses.
+SRCEOF
   hdiutil create -volname VC3D -srcfolder "$BASE/dist/stage" -fs HFS+ \
     -format UDZO -imagekey zlib-level=9 -ov "$BASE/dist/$name.dmg"
   echo "DMG: $BASE/dist/$name.dmg"
