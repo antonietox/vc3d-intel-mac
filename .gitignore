@@ -1,4 +1,12 @@
-*.AppImage
-*.AppImage.part
-old-appimages/
+# build environment and outputs
+/bin/
+/mamba/
+/env/
+/villa/
+/build/
+/dist/
+*.dmg
+*.log
+# superseded files kept locally
+/_old/
 .DS_Store

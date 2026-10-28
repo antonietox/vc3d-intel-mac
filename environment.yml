@@ -1,0 +1,34 @@
+# conda-forge build environment for VC3D on Intel (x86_64) macOS.
+# Homebrew no longer ships Intel bottles, so the official build_macos.sh would
+# compile LLVM, Qt, OpenCV, Boost, GCC... from source. conda-forge still
+# publishes current osx-64 binaries for all of them.
+name: vc3d-intel
+channels:
+  - conda-forge
+dependencies:
+  - cxx-compiler        # clang 21 (conda-forge), so VC3D uses its OpenMP stub like the official build
+  - c-compiler
+  - cmake
+  - ninja
+  - pkg-config
+  - git
+  - qt6-main
+  - libboost-devel
+  - ceres-solver
+  - eigen
+  - libopencv
+  - cgal-cpp
+  - blosc               # Blosc 1.x
+  - libtiff
+  - libcurl
+  - nlohmann_json
+  - sqlite
+  - openssl
+  - zstd
+  - lz4-c
+  - zlib
+  - mimalloc
+  - python
+  # libopencv 5.0.0 (build 611) links against abseil 20260526 but does not pin it;
+  # the newer 20260817 makes opencv_dnn fail to load at runtime.
+  - libabseil=20260526
