@@ -14,7 +14,7 @@ VC3D's official macOS builds are Apple Silicon only, and the official Docker ima
 | macOS | 15.7.9 Sequoia |
 | Docker Desktop | 4.96.1 (Intel), engine 29.9.2, 8 GB RAM assigned |
 | XQuartz | 2.8.1 |
-| VC3D | AppImage `VC3D-de9fc5d-2026-10-21-linux-x86_64` |
+| VC3D | AppImages `de9fc5d` (2026-10-21) and `322cb08` (2026-10-24), linux-x86_64 |
 
 Result: Open Data Catalog loads the live sample list from the public bucket, samples open from S3, pan/zoom is smooth. Image size ~1 GB, build ~1.5 min, VC3D uses ~0.9 GB RAM at start (plus the chunk cache you allow).
 
