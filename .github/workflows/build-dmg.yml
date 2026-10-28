@@ -1,0 +1,126 @@
+name: Build VC3D DMG (Intel)
+
+# Builds VC3D natively on GitHub's Intel macOS runner and publishes the DMG.
+# - Weekly: builds villa main; publishes a release if that commit has none yet.
+# - Manually (Actions -> Run workflow): any villa ref, publish optional.
+# GitHub keeps x86_64 macOS runners (macos-15-intel) until fall 2027.
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"   # Mondays 04:17 UTC
+  workflow_dispatch:
+    inputs:
+      villa_ref:
+        description: "villa branch, tag or commit"
+        default: "main"
+      publish:
+        description: "Publish a GitHub release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-dmg
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 240
+    env:
+      VILLA_REF: ${{ inputs.villa_ref || 'main' }}
+      JOBS: "4"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve villa commit
+        id: villa
+        run: |
+          sha=$(git ls-remote https://github.com/ScrollPrize/villa.git "$VILLA_REF" | head -1 | cut -f1)
+          [ -n "$sha" ] || sha="$VILLA_REF"   # a raw commit hash
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=${sha:0:7}" >> "$GITHUB_OUTPUT"
+          echo "Building villa $sha"
+
+      - name: Skip if this commit is already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release list --limit 100 --json tagName -q '.[].tagName' | grep -q -- "-${{ steps.villa.outputs.short }}$"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cache conda environment
+        if: steps.check.outputs.exists != 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/cache@v4
+        with:
+          path: env
+          key: env-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('environment.yml') }}
+
+      - name: Build environment
+        if: steps.check.outputs.exists != 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          if [ ! -x env/bin/cmake ]; then
+            curl -Ls https://micro.mamba.pm/api/micromamba/osx-64/latest | tar -xj bin/micromamba
+            MAMBA_ROOT_PREFIX=$PWD/mamba ./bin/micromamba create -y -p "$PWD/env" -f environment.yml
+          fi
+
+      - name: Get villa source and apply the patch
+        if: steps.check.outputs.exists != 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          git init -q villa
+          git -C villa remote add origin https://github.com/ScrollPrize/villa.git
+          git -C villa sparse-checkout set volume-cartographer vc_object_store
+          git -C villa fetch -q --depth 1 --filter=blob:none origin "${{ steps.villa.outputs.sha }}"
+          git -C villa checkout -q FETCH_HEAD
+          git -C villa apply ../patches/intel-mac-conda.patch
+
+      - name: Configure, build, package
+        if: steps.check.outputs.exists != 'true' || github.event_name == 'workflow_dispatch'
+        run: ./build-vc3d-native.sh all
+
+      - name: Smoke test
+        if: steps.check.outputs.exists != 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          dmg=$(ls dist/*.dmg)
+          hdiutil attach -nobrowse -readonly "$dmg"
+          codesign --verify --deep --strict /Volumes/VC3D/VC3D.app
+          /Volumes/VC3D/VC3D.app/Contents/MacOS/vc_render_tifxyz --help | head -3
+          # every bundled dylib must resolve inside the app
+          ! otool -L /Volumes/VC3D/VC3D.app/Contents/MacOS/* | grep -E "$PWD|/usr/local|/opt/homebrew"
+          hdiutil detach /Volumes/VC3D
+          shasum -a 256 "$dmg" | tee dist/SHA256.txt
+
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.exists != 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          name: vc3d-intel-dmg
+          path: |
+            dist/*.dmg
+            dist/SHA256.txt
+
+      - name: Publish release
+        if: >-
+          (github.event_name == 'schedule' && steps.check.outputs.exists != 'true') ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dmg=$(ls dist/*.dmg)
+          sha256=$(cut -d' ' -f1 dist/SHA256.txt)
+          tag="v$(date -u +%Y.%m.%d)-${{ steps.villa.outputs.short }}"
+          cat > notes.md <<EOF
+          Native VC3D for Intel (x86_64) Macs, built from villa \`${{ steps.villa.outputs.short }}\` by this repo's workflow.
+
+          **Install:** open the DMG and drag VC3D into Applications. First launch: open it once, then System Settings → Privacy & Security → **Open Anyway** (ad-hoc signed, not notarized).
+
+          Requires macOS 13.3+ and an AVX2 CPU. VC3D is GPL-3.0; source: https://github.com/ScrollPrize/villa/tree/${{ steps.villa.outputs.sha }} plus \`patches/intel-mac-conda.patch\` from this repo.
+
+          SHA-256: \`$sha256\`
+          EOF
+          gh release create "$tag" "$dmg" --title "VC3D ${{ steps.villa.outputs.short }} for Intel Macs" --notes-file notes.md

@@ -1,8 +1,18 @@
 diff --git a/volume-cartographer/CMakeLists.txt b/volume-cartographer/CMakeLists.txt
-index 0009a4d..163cc71 100644
+index 0009a4d..62023c5 100644
 --- a/volume-cartographer/CMakeLists.txt
 +++ b/volume-cartographer/CMakeLists.txt
-@@ -708,8 +708,13 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR MSVC)
+@@ -699,7 +699,8 @@ if(NOT TARGET vc_delta3d::vc_delta3d)
+     FetchContent_MakeAvailable(vc_delta3d)
+ endif()
+ 
+-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR MSVC)
++option(VC_CLANG_OPENMP "Use real OpenMP (libomp) with Clang instead of the no-op shim" OFF)
++if((CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT VC_CLANG_OPENMP) OR MSVC)
+     # Clang and MSVC both use the no-op OpenMP shim: -fopenmp / -openmp is never
+     # enabled, so every `#pragma omp` is ignored and the omp_*() runtime calls
+     # resolve to the inline stubs in core/openmp_stub/omp.h. These builds run the
+@@ -708,8 +709,13 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR MSVC)
      # silences the resulting unknown-pragma C4068 in the compiler-family block.)
      include_directories(${CMAKE_SOURCE_DIR}/core/openmp_stub)
      add_library(openmp_stub INTERFACE)
@@ -18,6 +28,413 @@ index 0009a4d..163cc71 100644
  else()
      find_package(OpenMP REQUIRED)
  endif()
+diff --git a/volume-cartographer/apps/VC3D/CMakeLists.txt b/volume-cartographer/apps/VC3D/CMakeLists.txt
+index 2647f88..8122586 100644
+--- a/volume-cartographer/apps/VC3D/CMakeLists.txt
++++ b/volume-cartographer/apps/VC3D/CMakeLists.txt
+@@ -19,7 +19,11 @@ set(srcs
+     FiberCollectionController.hpp
+     FiberDisplayOptions.hpp
+     CWindowContextMenu.cpp
++    FlowLayout.cpp
++    FlowLayout.hpp
+     StatusDockPanelHost.cpp
++    SystemMemory.cpp
++    SystemMemory.hpp
+     StatusDockPanelHost.hpp
+     RenderBenchRecorder.cpp
+     RenderBenchRecorder.hpp
+diff --git a/volume-cartographer/apps/VC3D/CWindow.cpp b/volume-cartographer/apps/VC3D/CWindow.cpp
+index 160dd5d..f0194ce 100644
+--- a/volume-cartographer/apps/VC3D/CWindow.cpp
++++ b/volume-cartographer/apps/VC3D/CWindow.cpp
+@@ -2877,12 +2877,8 @@ CWindow::CWindow(size_t cacheSizeGB, RenderBenchOptions benchOptions) :
+                 }
+             });
+ 
+-    if (_statusDockPanelHost) {
+-        if (auto* statusDockBar = _statusDockPanelHost->takeBarWidget()) {
+-            statusDockBar->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
+-            statusBar()->insertWidget(0, statusDockBar, 0);
+-        }
+-    }
++    // The panel bar stays in its own row above the status bar (inside
++    // StatusDockPanelHost), where it can wrap; QStatusBar would squeeze it.
+ 
+     _statusMessageLabel = new QLabel(this);
+     _statusMessageLabel->setObjectName(QStringLiteral("statusMessageLabel"));
+diff --git a/volume-cartographer/apps/VC3D/FlowLayout.cpp b/volume-cartographer/apps/VC3D/FlowLayout.cpp
+new file mode 100644
+index 0000000..ed6f114
+--- /dev/null
++++ b/volume-cartographer/apps/VC3D/FlowLayout.cpp
+@@ -0,0 +1,135 @@
++#include "FlowLayout.hpp"
++
++#include <QWidget>
++#include <QWidgetItem>
++
++#include <algorithm>
++
++FlowLayout::FlowLayout(QWidget* parent, int hSpacing, int vSpacing)
++    : QLayout(parent), _hSpace(hSpacing), _vSpace(vSpacing)
++{
++}
++
++FlowLayout::~FlowLayout()
++{
++    while (QLayoutItem* item = takeAt(0)) {
++        delete item;
++    }
++}
++
++void FlowLayout::addItem(QLayoutItem* item)
++{
++    _items.append(item);
++}
++
++void FlowLayout::insertWidget(int index, QWidget* widget)
++{
++    if (!widget) {
++        return;
++    }
++    addChildWidget(widget);
++    index = std::clamp(index, 0, static_cast<int>(_items.size()));
++    _items.insert(index, new QWidgetItem(widget));
++    invalidate();
++}
++
++int FlowLayout::count() const
++{
++    return static_cast<int>(_items.size());
++}
++
++QLayoutItem* FlowLayout::itemAt(int index) const
++{
++    return _items.value(index, nullptr);
++}
++
++QLayoutItem* FlowLayout::takeAt(int index)
++{
++    if (index < 0 || index >= _items.size()) {
++        return nullptr;
++    }
++    return _items.takeAt(index);
++}
++
++Qt::Orientations FlowLayout::expandingDirections() const
++{
++    return {};
++}
++
++bool FlowLayout::hasHeightForWidth() const
++{
++    return true;
++}
++
++int FlowLayout::heightForWidth(int width) const
++{
++    return doLayout(QRect(0, 0, width, 0), true);
++}
++
++QSize FlowLayout::minimumSize() const
++{
++    // Narrowest useful width: the widest single item (everything else wraps).
++    QSize size;
++    for (const QLayoutItem* item : _items) {
++        if (!item->isEmpty()) {
++            size = size.expandedTo(item->minimumSize().expandedTo(item->sizeHint()));
++        }
++    }
++    const QMargins m = contentsMargins();
++    return size + QSize(m.left() + m.right(), m.top() + m.bottom());
++}
++
++QSize FlowLayout::sizeHint() const
++{
++    // Preferred: everything on one row.
++    int width = 0;
++    int height = 0;
++    int visible = 0;
++    for (const QLayoutItem* item : _items) {
++        if (item->isEmpty()) {
++            continue;
++        }
++        const QSize hint = item->sizeHint();
++        width += hint.width();
++        height = std::max(height, hint.height());
++        ++visible;
++    }
++    if (visible > 1) {
++        width += _hSpace * (visible - 1);
++    }
++    const QMargins m = contentsMargins();
++    return QSize(width + m.left() + m.right(), height + m.top() + m.bottom());
++}
++
++void FlowLayout::setGeometry(const QRect& rect)
++{
++    QLayout::setGeometry(rect);
++    doLayout(rect, false);
++}
++
++int FlowLayout::doLayout(const QRect& rect, bool testOnly) const
++{
++    const QMargins m = contentsMargins();
++    const QRect area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom());
++    int x = area.x();
++    int y = area.y();
++    int lineHeight = 0;
++
++    for (QLayoutItem* item : _items) {
++        if (item->isEmpty()) {
++            continue;
++        }
++        const QSize hint = item->sizeHint();
++        if (x > area.x() && x + hint.width() > area.right() + 1) {
++            x = area.x();
++            y += lineHeight + _vSpace;
++            lineHeight = 0;
++        }
++        if (!testOnly) {
++            item->setGeometry(QRect(QPoint(x, y), hint));
++        }
++        x += hint.width() + _hSpace;
++        lineHeight = std::max(lineHeight, hint.height());
++    }
++    return y + lineHeight - rect.y() + m.bottom();
++}
+diff --git a/volume-cartographer/apps/VC3D/FlowLayout.hpp b/volume-cartographer/apps/VC3D/FlowLayout.hpp
+new file mode 100644
+index 0000000..b8ec31f
+--- /dev/null
++++ b/volume-cartographer/apps/VC3D/FlowLayout.hpp
+@@ -0,0 +1,33 @@
++#pragma once
++
++#include <QLayout>
++#include <QList>
++
++// Left-to-right layout that wraps onto another row when the width runs out,
++// instead of squeezing its widgets below their size hint.
++class FlowLayout final : public QLayout
++{
++public:
++    explicit FlowLayout(QWidget* parent = nullptr, int hSpacing = 4, int vSpacing = 3);
++    ~FlowLayout() override;
++
++    void addItem(QLayoutItem* item) override;
++    void insertWidget(int index, QWidget* widget);
++    int count() const override;
++    QLayoutItem* itemAt(int index) const override;
++    QLayoutItem* takeAt(int index) override;
++
++    Qt::Orientations expandingDirections() const override;
++    bool hasHeightForWidth() const override;
++    int heightForWidth(int width) const override;
++    QSize minimumSize() const override;
++    QSize sizeHint() const override;
++    void setGeometry(const QRect& rect) override;
++
++private:
++    int doLayout(const QRect& rect, bool testOnly) const;
++
++    QList<QLayoutItem*> _items;
++    int _hSpace;
++    int _vSpace;
++};
+diff --git a/volume-cartographer/apps/VC3D/SettingsDialog.cpp b/volume-cartographer/apps/VC3D/SettingsDialog.cpp
+index f4c6b00..1087c67 100644
+--- a/volume-cartographer/apps/VC3D/SettingsDialog.cpp
++++ b/volume-cartographer/apps/VC3D/SettingsDialog.cpp
+@@ -1,6 +1,7 @@
+ #include "SettingsDialog.hpp"
+ 
+ #include "VCSettings.hpp"
++#include "SystemMemory.hpp"
+ #include "vc/core/render/PersistentZarrCacheBudget.hpp"
+ #include "vc/core/render/ChunkCache.hpp"
+ #include "vc/core/types/VolumePkg.hpp"
+@@ -83,7 +84,7 @@ SettingsDialog::SettingsDialog(std::shared_ptr<VolumePkg> volumePackage,
+     chkEnableFileWatching->setChecked(settings.value(perf::ENABLE_FILE_WATCHING, perf::ENABLE_FILE_WATCHING_DEFAULT).toBool());
+ 
+     // Cache settings
+-    spinRamCacheSizeGB->setValue(settings.value(perf::RAM_CACHE_SIZE_GB, perf::RAM_CACHE_SIZE_GB_DEFAULT).toInt());
++    spinRamCacheSizeGB->setValue(settings.value(perf::RAM_CACHE_SIZE_GB, vc3d::defaultRamCacheSizeGB()).toInt());
+     spinViewerSurfaceCacheGB->setValue(
+         settings.value(viewer_cache::SURFACE_CACHE_GB,
+                        viewer_cache::SURFACE_CACHE_GB_DEFAULT).toInt());
+diff --git a/volume-cartographer/apps/VC3D/StatusDockPanelHost.cpp b/volume-cartographer/apps/VC3D/StatusDockPanelHost.cpp
+index b6b0578..96470ae 100644
+--- a/volume-cartographer/apps/VC3D/StatusDockPanelHost.cpp
++++ b/volume-cartographer/apps/VC3D/StatusDockPanelHost.cpp
+@@ -1,5 +1,7 @@
+ #include "StatusDockPanelHost.hpp"
+ 
++#include "FlowLayout.hpp"
++
+ #include "VCSettings.hpp"
+ 
+ #include <QApplication>
+@@ -90,10 +92,10 @@ StatusDockPanelHost::StatusDockPanelHost(QWidget* centralWidget, QWidget* parent
+     _barFrame = new QFrame(this);
+     _barFrame->setObjectName(QStringLiteral("statusDockBar"));
+     _barFrame->setFrameShape(QFrame::NoFrame);
+-    _barLayout = new QHBoxLayout(_barFrame);
++    // Wrap the panel buttons onto extra rows instead of squeezing them: with
++    // a dozen panels the labels used to be clipped on 13-15" screens.
++    _barLayout = new FlowLayout(_barFrame, 4, 3);
+     _barLayout->setContentsMargins(4, 3, 4, 3);
+-    _barLayout->setSpacing(4);
+-    _barLayout->addStretch(1);
+     _layout->addWidget(_barFrame, 0);
+ 
+     setStyleSheet(QStringLiteral(
+@@ -222,7 +224,7 @@ void StatusDockPanelHost::addDock(QDockWidget* dock)
+     item.pinButton = pin;
+     _items.push_back(item);
+     _stack->addWidget(page);
+-    _barLayout->insertWidget(std::max(0, _barLayout->count() - 1), button);
++    _barLayout->insertWidget(_barLayout->count(), button);
+     button->setVisible(item.visibleInBar);
+ 
+     if (QAction* action = dock->toggleViewAction()) {
+@@ -877,7 +879,7 @@ void StatusDockPanelHost::rebuildBarLayout()
+     }
+     for (const Item& item : _items) {
+         if (item.button) {
+-            _barLayout->insertWidget(std::max(0, _barLayout->count() - 1), item.button);
++            _barLayout->insertWidget(_barLayout->count(), item.button);
+         }
+     }
+ }
+diff --git a/volume-cartographer/apps/VC3D/StatusDockPanelHost.hpp b/volume-cartographer/apps/VC3D/StatusDockPanelHost.hpp
+index 733d5e7..213a534 100644
+--- a/volume-cartographer/apps/VC3D/StatusDockPanelHost.hpp
++++ b/volume-cartographer/apps/VC3D/StatusDockPanelHost.hpp
+@@ -9,7 +9,7 @@
+ 
+ class QDockWidget;
+ class QFrame;
+-class QHBoxLayout;
++class FlowLayout;
+ class QPushButton;
+ class QStackedWidget;
+ class QToolButton;
+@@ -92,7 +92,7 @@ private:
+     QFrame* _panelFrame{nullptr};
+     QStackedWidget* _stack{nullptr};
+     QFrame* _barFrame{nullptr};
+-    QHBoxLayout* _barLayout{nullptr};
++    FlowLayout* _barLayout{nullptr};
+     std::vector<Item> _items;
+     int _currentIndex{-1};
+     bool _positioningPanel{false};
+diff --git a/volume-cartographer/apps/VC3D/SystemMemory.cpp b/volume-cartographer/apps/VC3D/SystemMemory.cpp
+new file mode 100644
+index 0000000..239a091
+--- /dev/null
++++ b/volume-cartographer/apps/VC3D/SystemMemory.cpp
+@@ -0,0 +1,57 @@
++#include "SystemMemory.hpp"
++
++#include "VCSettings.hpp"
++
++#include <algorithm>
++
++#if defined(_WIN32)
++#  ifndef NOMINMAX
++#    define NOMINMAX
++#  endif
++#  include <windows.h>
++#elif defined(__APPLE__)
++#  include <sys/sysctl.h>
++#  include <sys/types.h>
++#else
++#  include <unistd.h>
++#endif
++
++namespace vc3d {
++
++std::uint64_t physicalMemoryBytes()
++{
++#if defined(_WIN32)
++    MEMORYSTATUSEX status{};
++    status.dwLength = sizeof(status);
++    if (GlobalMemoryStatusEx(&status)) {
++        return static_cast<std::uint64_t>(status.ullTotalPhys);
++    }
++    return 0;
++#elif defined(__APPLE__)
++    std::uint64_t bytes = 0;
++    size_t size = sizeof(bytes);
++    if (sysctlbyname("hw.memsize", &bytes, &size, nullptr, 0) == 0) {
++        return bytes;
++    }
++    return 0;
++#else
++    const long pages = sysconf(_SC_PHYS_PAGES);
++    const long pageSize = sysconf(_SC_PAGE_SIZE);
++    if (pages > 0 && pageSize > 0) {
++        return static_cast<std::uint64_t>(pages) * static_cast<std::uint64_t>(pageSize);
++    }
++    return 0;
++#endif
++}
++
++int defaultRamCacheSizeGB()
++{
++    constexpr int maxDefault = settings::perf::RAM_CACHE_SIZE_GB_DEFAULT;
++    const std::uint64_t gib = physicalMemoryBytes() >> 30;
++    if (gib == 0) {
++        return maxDefault;
++    }
++    return std::clamp(static_cast<int>(gib / 3), 2, maxDefault);
++}
++
++}  // namespace vc3d
+diff --git a/volume-cartographer/apps/VC3D/SystemMemory.hpp b/volume-cartographer/apps/VC3D/SystemMemory.hpp
+new file mode 100644
+index 0000000..bc83415
+--- /dev/null
++++ b/volume-cartographer/apps/VC3D/SystemMemory.hpp
+@@ -0,0 +1,15 @@
++#pragma once
++
++#include <cstdint>
++
++namespace vc3d {
++
++// Installed physical memory in bytes, or 0 if it can't be determined.
++std::uint64_t physicalMemoryBytes();
++
++// Default RAM chunk-cache size: a third of installed memory, between 2 GB and
++// the historical 10 GB default. The fixed 10 GB used to push 8-16 GB machines
++// into swap.
++int defaultRamCacheSizeGB();
++
++}  // namespace vc3d
+diff --git a/volume-cartographer/apps/VC3D/VCAppMain.cpp b/volume-cartographer/apps/VC3D/VCAppMain.cpp
+index 52d29e3..2d919b6 100644
+--- a/volume-cartographer/apps/VC3D/VCAppMain.cpp
++++ b/volume-cartographer/apps/VC3D/VCAppMain.cpp
+@@ -16,6 +16,7 @@
+ #include "SshPrompts.hpp"
+ #include "agent_bridge/AgentBridgeServer.hpp"
+ #include "VCSettings.hpp"
++#include "SystemMemory.hpp"
+ #include "vc/core/Version.hpp"
+ #include <QSettings>
+ #include "vc/core/render/ChunkCache.hpp"
+@@ -516,7 +517,7 @@ auto main(int argc, char* argv[]) -> int
+     {
+         using namespace vc3d::settings;
+         QSettings settings(vc3d::settingsFilePath(), QSettings::IniFormat);
+-        cacheSizeGB = settings.value(perf::RAM_CACHE_SIZE_GB, perf::RAM_CACHE_SIZE_GB_DEFAULT).toULongLong();
++        cacheSizeGB = settings.value(perf::RAM_CACHE_SIZE_GB, vc3d::defaultRamCacheSizeGB()).toULongLong();
+         automaticDownloadParallelism = settings.value(
+             perf::REMOTE_DOWNLOAD_AUTOMATIC,
+             perf::REMOTE_DOWNLOAD_AUTOMATIC_DEFAULT).toBool();
 diff --git a/volume-cartographer/cmake/MacPackaging.cmake b/volume-cartographer/cmake/MacPackaging.cmake
 index acf92ad..4e39c17 100644
 --- a/volume-cartographer/cmake/MacPackaging.cmake
@@ -54,3 +471,41 @@ index acf92ad..4e39c17 100644
              endif()
          endforeach()
          # Bundle-level signature last (re-signs the main executable and seals
+diff --git a/volume-cartographer/core/CMakeLists.txt b/volume-cartographer/core/CMakeLists.txt
+index 2cde51b..1e42cce 100644
+--- a/volume-cartographer/core/CMakeLists.txt
++++ b/volume-cartographer/core/CMakeLists.txt
+@@ -27,6 +27,7 @@ add_library(vc_core
+         src/VoxelSizeMetadata.cpp
+         src/SparseChunkSpool.cpp
+         src/Slicing.cpp
++        src/OpenMPDefaults.cpp
+         src/Compositing.cpp
+         src/AffineTransform.cpp
+         src/ScaleTifxyz.cpp
+diff --git a/volume-cartographer/core/src/OpenMPDefaults.cpp b/volume-cartographer/core/src/OpenMPDefaults.cpp
+new file mode 100644
+index 0000000..ee7a051
+--- /dev/null
++++ b/volume-cartographer/core/src/OpenMPDefaults.cpp
+@@ -0,0 +1,20 @@
++// With LLVM's OpenMP runtime (libomp), idle worker threads spin for 200 ms
++// after each parallel region by default. VC3D's parallel regions are short
++// and frequent, so the spinning roughly triples CPU time without making
++// anything faster. Make idle workers sleep immediately unless the user set
++// KMP_BLOCKTIME. libomp reads its environment before this library's static
++// initializers run, so use the runtime API rather than setenv().
++#if defined(_OPENMP) && defined(__clang__)
++#include <omp.h>
++
++#include <cstdlib>
++
++namespace {
++[[maybe_unused]] const bool kOpenMPDefaultsApplied = [] {
++    if (std::getenv("KMP_BLOCKTIME") == nullptr) {
++        kmp_set_blocktime(0);
++    }
++    return true;
++}();
++}  // namespace
++#endif

@@ -6,7 +6,7 @@ name: vc3d-intel
 channels:
   - conda-forge
 dependencies:
-  - cxx-compiler        # clang 21 (conda-forge), so VC3D uses its OpenMP stub like the official build
+  - cxx-compiler        # clang 21 (conda-forge)
   - c-compiler
   - cmake
   - ninja
@@ -29,6 +29,16 @@ dependencies:
   - zlib
   - mimalloc
   - python
+  - llvm-openmp         # real OpenMP for clang (VC_CLANG_OPENMP=ON)
+  # flatboi / PaStiX
+  - gfortran
+  - scotch=*=int32*     # PaStiX is built with 32-bit integers
+  - libscotch=*=int32*
+  - libhwloc
+  - libxml2-devel       # hwloc.pc requires libxml-2.0.pc
+  - libcblas
+  - liblapacke
+  - libblas=*=*openblas
   # libopencv 5.0.0 (build 611) links against abseil 20260526 but does not pin it;
   # the newer 20260817 makes opencv_dnn fail to load at runtime.
   - libabseil=20260526
