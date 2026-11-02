@@ -1,9 +1,9 @@
 diff --git a/volume-cartographer/CMakeLists.txt b/volume-cartographer/CMakeLists.txt
-index 0009a4d..62023c5 100644
+index 6962201..2a24d1b 100644
 --- a/volume-cartographer/CMakeLists.txt
 +++ b/volume-cartographer/CMakeLists.txt
-@@ -699,7 +699,8 @@ if(NOT TARGET vc_delta3d::vc_delta3d)
-     FetchContent_MakeAvailable(vc_delta3d)
+@@ -649,7 +649,8 @@ if(NOT TARGET vc_delta3d::vc_delta3d)
+     vc_fetch_delta3d()
  endif()
  
 -if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR MSVC)
@@ -12,7 +12,7 @@ index 0009a4d..62023c5 100644
      # Clang and MSVC both use the no-op OpenMP shim: -fopenmp / -openmp is never
      # enabled, so every `#pragma omp` is ignored and the omp_*() runtime calls
      # resolve to the inline stubs in core/openmp_stub/omp.h. These builds run the
-@@ -708,8 +709,13 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR MSVC)
+@@ -658,8 +659,13 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR MSVC)
      # silences the resulting unknown-pragma C4068 in the compiler-family block.)
      include_directories(${CMAKE_SOURCE_DIR}/core/openmp_stub)
      add_library(openmp_stub INTERFACE)
@@ -29,26 +29,25 @@ index 0009a4d..62023c5 100644
      find_package(OpenMP REQUIRED)
  endif()
 diff --git a/volume-cartographer/apps/VC3D/CMakeLists.txt b/volume-cartographer/apps/VC3D/CMakeLists.txt
-index 2647f88..8122586 100644
+index 1fdee3d..6900731 100644
 --- a/volume-cartographer/apps/VC3D/CMakeLists.txt
 +++ b/volume-cartographer/apps/VC3D/CMakeLists.txt
-@@ -19,7 +19,11 @@ set(srcs
+@@ -22,6 +22,10 @@ set(srcs
+     SurfaceCatalog.hpp
      FiberCollectionController.hpp
      FiberDisplayOptions.hpp
-     CWindowContextMenu.cpp
 +    FlowLayout.cpp
 +    FlowLayout.hpp
-     StatusDockPanelHost.cpp
 +    SystemMemory.cpp
 +    SystemMemory.hpp
-     StatusDockPanelHost.hpp
-     RenderBenchRecorder.cpp
-     RenderBenchRecorder.hpp
+     FiberOverlayColors.hpp
+     fibers3d/Fiber3DScene.hpp
+     fibers3d/Fiber3DData.cpp
 diff --git a/volume-cartographer/apps/VC3D/CWindow.cpp b/volume-cartographer/apps/VC3D/CWindow.cpp
-index 160dd5d..f0194ce 100644
+index 3771b08..1932fa9 100644
 --- a/volume-cartographer/apps/VC3D/CWindow.cpp
 +++ b/volume-cartographer/apps/VC3D/CWindow.cpp
-@@ -2877,12 +2877,8 @@ CWindow::CWindow(size_t cacheSizeGB, RenderBenchOptions benchOptions) :
+@@ -1118,12 +1118,8 @@ CWindow::CWindow(size_t cacheSizeGB, bool debugDownloadQueue) :
                  }
              });
  
@@ -244,7 +243,7 @@ index 0000000..b8ec31f
 +    int _vSpace;
 +};
 diff --git a/volume-cartographer/apps/VC3D/SettingsDialog.cpp b/volume-cartographer/apps/VC3D/SettingsDialog.cpp
-index f4c6b00..1087c67 100644
+index e104613..af24874 100644
 --- a/volume-cartographer/apps/VC3D/SettingsDialog.cpp
 +++ b/volume-cartographer/apps/VC3D/SettingsDialog.cpp
 @@ -1,6 +1,7 @@
@@ -255,7 +254,7 @@ index f4c6b00..1087c67 100644
  #include "vc/core/render/PersistentZarrCacheBudget.hpp"
  #include "vc/core/render/ChunkCache.hpp"
  #include "vc/core/types/VolumePkg.hpp"
-@@ -83,7 +84,7 @@ SettingsDialog::SettingsDialog(std::shared_ptr<VolumePkg> volumePackage,
+@@ -63,7 +64,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
      chkEnableFileWatching->setChecked(settings.value(perf::ENABLE_FILE_WATCHING, perf::ENABLE_FILE_WATCHING_DEFAULT).toBool());
  
      // Cache settings
@@ -415,10 +414,10 @@ index 0000000..bc83415
 +
 +}  // namespace vc3d
 diff --git a/volume-cartographer/apps/VC3D/VCAppMain.cpp b/volume-cartographer/apps/VC3D/VCAppMain.cpp
-index 52d29e3..2d919b6 100644
+index 4215416..938f9c4 100644
 --- a/volume-cartographer/apps/VC3D/VCAppMain.cpp
 +++ b/volume-cartographer/apps/VC3D/VCAppMain.cpp
-@@ -16,6 +16,7 @@
+@@ -17,6 +17,7 @@
  #include "SshPrompts.hpp"
  #include "agent_bridge/AgentBridgeServer.hpp"
  #include "VCSettings.hpp"
@@ -426,7 +425,7 @@ index 52d29e3..2d919b6 100644
  #include "vc/core/Version.hpp"
  #include <QSettings>
  #include "vc/core/render/ChunkCache.hpp"
-@@ -516,7 +517,7 @@ auto main(int argc, char* argv[]) -> int
+@@ -460,7 +461,7 @@ auto main(int argc, char* argv[]) -> int
      {
          using namespace vc3d::settings;
          QSettings settings(vc3d::settingsFilePath(), QSettings::IniFormat);
@@ -436,7 +435,7 @@ index 52d29e3..2d919b6 100644
              perf::REMOTE_DOWNLOAD_AUTOMATIC,
              perf::REMOTE_DOWNLOAD_AUTOMATIC_DEFAULT).toBool();
 diff --git a/volume-cartographer/cmake/MacPackaging.cmake b/volume-cartographer/cmake/MacPackaging.cmake
-index acf92ad..4e39c17 100644
+index 9f7e2ea..64c81fb 100644
 --- a/volume-cartographer/cmake/MacPackaging.cmake
 +++ b/volume-cartographer/cmake/MacPackaging.cmake
 @@ -33,6 +33,10 @@ string(REGEX MATCH "^[0-9]+" VC_MACOS_MIN_VERSION "${_vc_host_macos}")
@@ -450,39 +449,18 @@ index acf92ad..4e39c17 100644
  configure_file("${CMAKE_SOURCE_DIR}/cmake/MacOSBundleInfo.plist.in"
      "${CMAKE_BINARY_DIR}/Info.plist" @ONLY)
  install(FILES "${CMAKE_BINARY_DIR}/Info.plist"
-@@ -173,10 +177,16 @@ if(VC_MACDEPLOYQT)
- 
-             # Install-name rewriting invalidates Mach-O signatures. Ad-hoc
-             # re-sign each file because arm64 macOS refuses to load it otherwise.
--            execute_process(COMMAND codesign --force --sign - "${_f}"
--                RESULT_VARIABLE _cs_rc ERROR_VARIABLE _cs_err)
--            if(NOT _cs_rc EQUAL 0)
--                message(FATAL_ERROR "codesign failed for ${_f}: ${_cs_err}")
-+            # The bundle's main executable is signed by the bundle-level
-+            # codesign below. Signing it here first fails on x86_64, where the
-+            # linker does not ad-hoc sign the sibling vc_* tools (arm64 ld
-+            # always does), so codesign sees unsigned nested code.
-+            if(NOT _f MATCHES "/Contents/MacOS/VC3D$")
-+                execute_process(COMMAND codesign --force --sign - "${_f}"
-+                    RESULT_VARIABLE _cs_rc ERROR_VARIABLE _cs_err)
-+                if(NOT _cs_rc EQUAL 0)
-+                    message(FATAL_ERROR "codesign failed for ${_f}: ${_cs_err}")
-+                endif()
-             endif()
-         endforeach()
-         # Bundle-level signature last (re-signs the main executable and seals
 diff --git a/volume-cartographer/core/CMakeLists.txt b/volume-cartographer/core/CMakeLists.txt
-index 2cde51b..1e42cce 100644
+index aaf3286..d9c6679 100644
 --- a/volume-cartographer/core/CMakeLists.txt
 +++ b/volume-cartographer/core/CMakeLists.txt
-@@ -27,6 +27,7 @@ add_library(vc_core
+@@ -26,6 +26,7 @@ add_library(vc_core
          src/VoxelSizeMetadata.cpp
          src/SparseChunkSpool.cpp
          src/Slicing.cpp
 +        src/OpenMPDefaults.cpp
          src/Compositing.cpp
-         src/AffineTransform.cpp
-         src/ScaleTifxyz.cpp
+         src/PlaneSurface.cpp
+         src/Surface.cpp
 diff --git a/volume-cartographer/core/src/OpenMPDefaults.cpp b/volume-cartographer/core/src/OpenMPDefaults.cpp
 new file mode 100644
 index 0000000..ee7a051
